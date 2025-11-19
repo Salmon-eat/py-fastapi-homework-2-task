@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Path
+from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,31 +170,38 @@ async def delete_movie(
 async def update_movie(
     movie_id: int, movie_data: MovieUpdateSchema, db: AsyncSession = Depends(get_db)
 ):
-    result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
-    movie = result.scalar_one_or_none()
-
-    if not movie:
-        raise HTTPException(
-            status_code=404, detail="Movie with the given ID was not found."
-        )
-
-    update_data = movie_data.model_dump(exclude_unset=True)
-
     try:
-        if "score" in update_data and not (0 <= update_data["score"] <= 100):
-            raise ValueError("Score must be between 0 and 100")
-        if "budget" in update_data and update_data["budget"] < 0:
-            raise ValueError("Budget must be non-negative")
-        if "revenue" in update_data and update_data["revenue"] < 0:
-            raise ValueError("Revenue must be non-negative")
-    except Exception:
+        result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
+        movie = result.scalar_one_or_none()
+
+        if not movie:
+            raise HTTPException(
+                status_code=404, detail="Movie with the given ID was not found."
+            )
+
+        update_data = movie_data.model_dump(exclude_unset=True)
+
+        try:
+            if "score" in update_data and not (0 <= update_data["score"] <= 100):
+                raise ValueError("Score must be between 0 and 100")
+            if "budget" in update_data and update_data["budget"] < 0:
+                raise ValueError("Budget must be non-negative")
+            if "revenue" in update_data and update_data["revenue"] < 0:
+                raise ValueError("Revenue must be non-negative")
+        except Exception:
+            raise HTTPException(
+                status_code=HTTP_400_BAD_REQUEST, detail="Invalid input data."
+            )
+
+        for field, value in update_data.items():
+            setattr(movie, field, value)
+
+        await db.commit()
+
+        return {"detail": "Movie updated successfully."}
+    except RequestValidationError:
+
         raise HTTPException(
-            status_code=HTTP_400_BAD_REQUEST, detail="Invalid input data."
+            status_code=400,
+            detail="Bad request.",
         )
-
-    for field, value in update_data.items():
-        setattr(movie, field, value)
-
-    await db.commit()
-
-    return {"detail": "Movie updated successfully."}
